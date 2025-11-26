@@ -78,3 +78,49 @@ def detectar(frame: np.ndarray) -> List[Detection]:
         detecciones.append(det)
 
     return detecciones
+
+
+def calcular_iou(boxA, boxB):
+    # box: [x1, y1, x2, y2]
+    xA = max(boxA["x1"], boxB["x1"])
+    yA = max(boxA["y1"], boxB["y1"])
+    xB = min(boxA["x2"], boxB["x2"])
+    yB = min(boxA["y2"], boxB["y2"])
+
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+    if interArea == 0:
+        return 0.0
+
+    boxAArea = (boxA["x2"] - boxA["x1"]) * (boxA["y2"] - boxA["y1"])
+    boxBArea = (boxB["x2"] - boxB["x1"]) * (boxB["y2"] - boxB["y1"])
+
+    iou = interArea / float(boxAArea + boxBArea - interArea)
+    return iou
+
+
+def combinar_detecciones(
+    dets_yolo: List[Detection],
+    dets_mov: List[Detection],
+    iou_thresh: float = 0.3
+) -> List[Detection]:
+    """
+    Combina detecciones de YOLO y Movimiento.
+    - Prioridad a YOLO: si un objeto de movimiento solapa con uno de YOLO,
+      nos quedamos con el de YOLO (que tiene clase específica).
+    - Si Movimiento no solapa con nada de YOLO, lo añadimos como posible objeto de interés.
+    """
+    finales = list(dets_yolo)  # Copia superficial
+
+    for d_mov in dets_mov:
+        solapa = False
+        for d_yolo in dets_yolo:
+            iou = calcular_iou(d_mov, d_yolo)
+            if iou > iou_thresh:
+                solapa = True
+                break
+        
+        if not solapa:
+            # Es un objeto en movimiento que YOLO no ha visto
+            finales.append(d_mov)
+            
+    return finales

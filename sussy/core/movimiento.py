@@ -250,6 +250,8 @@ class MotionDetector:
             }
             detecciones.append(det)
 
+        return detecciones
+
 def detectar_estaticos(
     frame,
     min_area: int = 6,

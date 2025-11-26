@@ -4,7 +4,8 @@ from typing import Optional, List
 import cv2
 
 from sussy.core.ingesta import frames_desde_video
-from sussy.core.deteccion import detectar
+from sussy.core.deteccion import detectar, combinar_detecciones
+from sussy.core.movimiento import MotionDetector
 from sussy.core.seguimiento import TrackerSimple
 from sussy.core.visualizacion import dibujar_tracks
 from sussy.core.registro import RegistradorCSV
@@ -42,6 +43,7 @@ def main() -> None:
     print("Pulsa 'q' en la ventana de vídeo para salir.")
 
     tracker = TrackerSimple()
+    motion_detector = MotionDetector()
     logger: Optional[RegistradorCSV] = None
     if args.log_csv:
         logger = RegistradorCSV(args.log_csv)
@@ -59,10 +61,15 @@ def main() -> None:
             alto, ancho, canales = frame.shape
             print(f"Resolución: {ancho}x{alto}, canales: {canales}")
 
-        # 1) Detección con YOLO (única fuente de detecciones por ahora)
-        detecciones = detectar(frame) or []
-        if detecciones is None:
-            detecciones = []
+        # 1) Detección con YOLO
+        detecciones_yolo = detectar(frame) or []
+        
+        # 2) Detección de movimiento (para objetos pequeños/lejanos)
+        detecciones_mov = motion_detector.actualizar(frame)
+
+        # 3) Combinar ambas
+        detecciones = combinar_detecciones(detecciones_yolo, detecciones_mov)
+
 
         # 2) Tracking (asigna IDs a las detecciones)
         tracks = tracker.actualizar(detecciones)
