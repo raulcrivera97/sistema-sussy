@@ -1,53 +1,26 @@
 import csv
-from pathlib import Path
-from typing import List, Optional
-
-from sussy.core.seguimiento import Track
-
+import os
+from typing import List, Dict, Any
 
 class RegistradorCSV:
-    """
-    Registra los tracks frame a frame en un CSV.
-
-    Formato columnas:
-    frame,id,clase,score,x1,y1,x2,y2
-    """
-
-    def __init__(self, ruta_csv: str) -> None:
-        # Aseguramos que la ruta tiene extensión .csv
-        path = Path(ruta_csv)
-        if path.suffix.lower() != ".csv":
-            path = path.with_suffix(".csv")
-
-        self._ruta = path
-        self._f = open(self._ruta, "w", newline="", encoding="utf-8")
-        self._writer = csv.writer(self._f)
-
+    def __init__(self, ruta: str):
+        self.ruta = ruta
+        self.archivo = open(ruta, mode='w', newline='', encoding='utf-8')
+        self.writer = csv.writer(self.archivo)
         # Cabecera
-        self._writer.writerow(["frame", "id", "clase", "score", "x1", "y1", "x2", "y2"])
+        self.writer.writerow(["frame", "id", "x1", "y1", "x2", "y2", "clase", "score"])
 
-    def registrar(self, frame_idx: int, tracks: List[Track]) -> None:
-        """
-        Registra todos los tracks de un frame.
-        """
+    def registrar(self, frame_idx: int, tracks: List[Dict[str, Any]]) -> None:
         for t in tracks:
-            self._writer.writerow(
-                [
-                    frame_idx,
-                    t["id"],
-                    t["clase"],
-                    f"{t['score']:.4f}",
-                    t["x1"],
-                    t["y1"],
-                    t["x2"],
-                    t["y2"],
-                ]
-            )
+            x1, y1, x2, y2 = t['box']
+            self.writer.writerow([
+                frame_idx,
+                t['id'],
+                x1, y1, x2, y2,
+                t.get('clase', ''),
+                t.get('score', 0.0)
+            ])
 
-    def cerrar(self) -> None:
-        if not self._f.closed:
-            self._f.close()
-
-    @property
-    def ruta(self) -> Path:
-        return self._ruta
+    def cerrar(self):
+        if self.archivo:
+            self.archivo.close()

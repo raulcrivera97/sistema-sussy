@@ -1,35 +1,38 @@
-from typing import List
-
 import cv2
 import numpy as np
+from typing import List, Dict, Any
 
-from sussy.core.seguimiento import Track
-
-
-def dibujar_tracks(frame: np.ndarray, tracks: List[Track]) -> None:
+def dibujar_tracks(frame: np.ndarray, tracks: List[Dict[str, Any]]) -> None:
     """
-    Dibuja las cajas y los IDs de los tracks sobre el frame.
-    Modifica el frame IN PLACE.
+    Dibuja los bounding boxes y los IDs de los tracks en el frame.
     """
     for track in tracks:
-        x1 = track["x1"]
-        y1 = track["y1"]
-        x2 = track["x2"]
-        y2 = track["y2"]
-        track_id = track["id"]
-        clase = track["clase"]
-        score = track["score"]
+        x1, y1, x2, y2 = map(int, track['box'])
+        tid = track['id']
+        clase = track.get('clase', 'unk')
+        score = track.get('score', 0.0)
 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        # Color diferente para movimiento vs yolo?
+        # Por ahora verde para todo
+        color = (0, 255, 0)
+        if clase == "movimiento":
+            color = (0, 255, 255) # Amarillo para movimiento puro
 
-        texto = f"{clase}#{track_id} ({score:.2f})"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        
+        label = f"ID:{tid} {clase} {score:.2f}"
+        
+        # Fondo para el texto
+        (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (x1, y1 - 20), (x1 + w, y1), color, -1)
+        
         cv2.putText(
             frame,
-            texto,
-            (x1, max(y1 - 10, 10)),
+            label,
+            (x1, y1 - 5),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (0, 255, 0),
+            (0, 0, 0),
             1,
             cv2.LINE_AA,
         )
