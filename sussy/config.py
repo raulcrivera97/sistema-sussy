@@ -45,6 +45,7 @@ class Config:
     MOVIMIENTO_CONTRASTE_MIN = 5.0
     MOVIMIENTO_MIN_FRAMES = 3
     MOVIMIENTO_MIN_DESPLAZAMIENTO = 5
+    MOVIMIENTO_CROP_PADDING_PCT = 0.3  # Aumenta recortes de movimiento para contexto adicional
 
     # ==========================================
     # DETECCIÓN (YOLO / IA)
@@ -78,6 +79,15 @@ class Config:
     RELEVANCIA_VEL_MIN = 1.2            # Pixels por frame para considerar que realmente se desplaza
     RELEVANCIA_BORDE_PCT = 0.08         # Porcentaje de margen: movimiento pegado al borde suele ser vegetación
     RELEVANCIA_ASPECTO_RAMAS = 6.0      # Relaciones de aspecto muy alargadas suelen corresponder a ramas/paneles
+
+    # ==========================================
+    # PREDICCIÓN DE MOVIMIENTO / ZONAS DE INTERÉS
+    # ==========================================
+    USAR_PREDICCION_MOVIMIENTO = True
+    PREDICCION_FRAMES_ADELANTE = 3       # Cuántos frames proyectamos hacia delante
+    PREDICCION_PADDING_PCT = 0.45        # Margen extra alrededor de la zona predicha
+    PREDICCION_VEL_MIN = 0.8             # Velocidad mínima (px/frame) para ser candidato
+    PREDICCION_MAX_ZONAS = 8             # Límite para evitar excesos de recortes
 
     # ==========================================
     # ORQUESTADOR DE ALERTAS

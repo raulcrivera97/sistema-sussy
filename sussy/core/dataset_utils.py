@@ -3,7 +3,16 @@ import cv2
 import numpy as np
 from datetime import datetime
 
-def guardar_crop(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, clase: str, ruta_base: str):
+def guardar_crop(
+    frame: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    clase: str,
+    ruta_base: str,
+    padding_pct: float = 0.0,
+):
     """
     Guarda un recorte de la imagen en la ruta especificada, organizado por fecha y clase.
     Estructura: ruta_base / YYYY-MM-DD / clase / timestamp_id.jpg
@@ -13,6 +22,17 @@ def guardar_crop(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, clase: s
 
     # Validar coordenadas
     alto, ancho = frame.shape[:2]
+
+    if padding_pct > 0.0:
+        width = x2 - x1
+        height = y2 - y1
+        pad_x = int(max(2, round(width * padding_pct)))
+        pad_y = int(max(2, round(height * padding_pct)))
+        x1 -= pad_x
+        x2 += pad_x
+        y1 -= pad_y
+        y2 += pad_y
+
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(ancho, x2), min(alto, y2)
     

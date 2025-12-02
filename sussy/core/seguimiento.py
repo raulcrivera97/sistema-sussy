@@ -10,7 +10,7 @@ class TrackerSimple:
         self.max_dist = max_dist
         self.max_frames_lost = max_frames_lost
         self.iou_threshold = iou_threshold
-        self.tracks = {}  # id -> {box, frames_lost, clase, score}
+        self.tracks = {}  # id -> {box, frames_lost, clase, score, cx, cy, vel_x, vel_y}
         self.next_id = 1
 
     def actualizar(self, detecciones: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -94,7 +94,11 @@ class TrackerSimple:
                     "box": track['box'],
                     "clase": track['clase'],
                     "score": track['score'],
-                    "perdido": False
+                    "perdido": False,
+                    "velocidad": {
+                        "x": track.get('vel_x', 0.0),
+                        "y": track.get('vel_y', 0.0),
+                    },
                 })
             else:
                 # Track perdido en este frame
@@ -103,10 +107,14 @@ class TrackerSimple:
                     # Aún tenemos paciencia, lo devolvemos para visualización (anti-parpadeo)
                     final_tracks.append({
                         "id": tid,
-                        "box": track['box'], # Devolvemos la última posición conocida
+                        "box": track['box'],  # Devolvemos la última posición conocida
                         "clase": track['clase'],
                         "score": track['score'],
-                        "perdido": True # Flag por si queremos pintarlo diferente
+                        "perdido": True,  # Flag por si queremos pintarlo diferente
+                        "velocidad": {
+                            "x": track.get('vel_x', 0.0),
+                            "y": track.get('vel_y', 0.0),
+                        },
                     })
                 else:
                     # Se acabó la paciencia
@@ -118,17 +126,36 @@ class TrackerSimple:
         return final_tracks
 
     def _actualizar_track(self, tid, det):
-        self.tracks[tid]['box'] = [det['x1'], det['y1'], det['x2'], det['y2']]
-        self.tracks[tid]['frames_lost'] = 0
-        self.tracks[tid]['clase'] = det['clase']
-        self.tracks[tid]['score'] = det['score']
+        track = self.tracks[tid]
+        new_box = [det['x1'], det['y1'], det['x2'], det['y2']]
+        new_cx = (new_box[0] + new_box[2]) / 2
+        new_cy = (new_box[1] + new_box[3]) / 2
+        prev_cx = track.get('cx', new_cx)
+        prev_cy = track.get('cy', new_cy)
+
+        track['vel_x'] = new_cx - prev_cx
+        track['vel_y'] = new_cy - prev_cy
+        track['cx'] = new_cx
+        track['cy'] = new_cy
+
+        track['box'] = new_box
+        track['frames_lost'] = 0
+        track['clase'] = det['clase']
+        track['score'] = det['score']
 
     def _crear_track(self, det):
         new_id = self.next_id
         self.next_id += 1
+        box = [det['x1'], det['y1'], det['x2'], det['y2']]
+        cx = (box[0] + box[2]) / 2
+        cy = (box[1] + box[3]) / 2
         self.tracks[new_id] = {
-            "box": [det['x1'], det['y1'], det['x2'], det['y2']],
+            "box": box,
             "frames_lost": 0,
             "clase": det['clase'],
-            "score": det['score']
+            "score": det['score'],
+            "cx": cx,
+            "cy": cy,
+            "vel_x": 0.0,
+            "vel_y": 0.0,
         }

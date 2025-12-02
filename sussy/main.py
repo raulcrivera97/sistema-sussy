@@ -17,6 +17,7 @@ from sussy.core.fuentes import normalizar_source, abrir_fuente_video
 from sussy.core.movimiento import DetectorMovimiento
 from sussy.core.relevancia import EvaluadorRelevancia
 from sussy.core.seguimiento import TrackerSimple
+from sussy.core.prediccion import PredictorMovimiento
 from sussy.core.visualizacion import dibujar_tracks
 from sussy.core.registro import RegistradorCSV
 from sussy.core.dataset_utils import guardar_crop
@@ -193,6 +194,7 @@ def main() -> None:
 
     # --- INICIALIZACIÓN MODULAR ---
     tracker = None
+    predictor_movimiento = None
     if Config.USAR_TRACKER:
         tracker = TrackerSimple(
             max_dist=Config.TRACKER_MATCH_DIST,
@@ -200,6 +202,19 @@ def main() -> None:
             iou_threshold=Config.TRACKER_IOU_THRESHOLD
         )
         print(f"Tracker: ACTIVADO (Paciencia={Config.TRACKER_MAX_FRAMES_LOST}, IoU={Config.TRACKER_IOU_THRESHOLD})")
+
+        if Config.USAR_PREDICCION_MOVIMIENTO:
+            predictor_movimiento = PredictorMovimiento(
+                frames_adelante=Config.PREDICCION_FRAMES_ADELANTE,
+                padding_pct=Config.PREDICCION_PADDING_PCT,
+                vel_min=Config.PREDICCION_VEL_MIN,
+                max_zonas=Config.PREDICCION_MAX_ZONAS,
+            )
+            print(
+                "Predicción Movimiento: ACTIVADA "
+                f"(adelante={Config.PREDICCION_FRAMES_ADELANTE}, "
+                f"padding={Config.PREDICCION_PADDING_PCT})"
+            )
     else:
         print("Tracker: DESACTIVADO")
 
@@ -352,6 +367,29 @@ def main() -> None:
                         modelo_path=Config.YOLO_MODELO,
                         clases_permitidas=Config.YOLO_CLASES_PERMITIDAS
                     ) or []
+
+                if predictor_movimiento:
+                    zonas_predichas = predictor_movimiento.consumir_zonas()
+                    detecciones_predichas = []
+                    for zona in zonas_predichas:
+                        zx1, zy1, zx2, zy2 = zona.as_tuple()
+                        det_pred = analizar_recorte(
+                            frame,
+                            zx1,
+                            zy1,
+                            zx2,
+                            zy2,
+                            conf_umbral=max(0.1, Config.YOLO_CONF_UMBRAL - 0.2),
+                            modelo_path=Config.YOLO_MODELO,
+                            clases_permitidas=Config.YOLO_CLASES_PERMITIDAS,
+                        )
+                        if det_pred:
+                            det_pred["descripcion"] = "Zona anticipada"
+                            det_pred.setdefault("score", 0.4)
+                            detecciones_predichas.append(det_pred)
+
+                    if detecciones_predichas:
+                        detecciones_yolo.extend(detecciones_predichas)
                 
                 detecciones_mov = []
                 if detector_movimiento:
@@ -383,7 +421,8 @@ def main() -> None:
                             d_mov['x1'], d_mov['y1'], d_mov['x2'], d_mov['y2'],
                             conf_umbral=Config.YOLO_CONF_UMBRAL - 0.1, # Un poco más permisivo
                             modelo_path=Config.YOLO_MODELO,
-                            clases_permitidas=Config.YOLO_CLASES_PERMITIDAS
+                            clases_permitidas=Config.YOLO_CLASES_PERMITIDAS,
+                            padding_pct=Config.MOVIMIENTO_CROP_PADDING_PCT,
                         )
                         
                         if detectado_en_crop:
@@ -402,7 +441,8 @@ def main() -> None:
                             frame, 
                             d_mov['x1'], d_mov['y1'], d_mov['x2'], d_mov['y2'],
                             clase_guardar,
-                            Config.RUTA_DATASET_CAPTURE
+                            Config.RUTA_DATASET_CAPTURE,
+                            padding_pct=Config.MOVIMIENTO_CROP_PADDING_PCT,
                         )
 
                 # Añadimos lo nuevo encontrado a la lista "oficial" de YOLO para que el tracker lo pille
@@ -414,6 +454,8 @@ def main() -> None:
                 tracks = []
                 if tracker:
                     tracks = tracker.actualizar(detecciones)
+                    if predictor_movimiento:
+                        predictor_movimiento.preparar_zonas(tracks, frame.shape)
                 else:
                     # Si no hay tracker, pasamos las detecciones crudas como "tracks" para visualizar
                     for d in detecciones:
@@ -445,7 +487,7 @@ def main() -> None:
             
             # Info overlay
             if Config.MOSTRAR_UI:
-                texto = f"Frame {indice_frame_actual}/{total_frames} – objs: {len(tracks)}"
+                texto = f"Frame {indice_frame_actual}/{total_frames} - objs: {len(tracks)}"
                 cv2.putText(frame, texto, (ancho - 350, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         else:
@@ -462,7 +504,7 @@ def main() -> None:
                  
                  # Info overlay
                  if Config.MOSTRAR_UI:
-                     texto = f"Frame {indice_frame_actual}/{total_frames} – objs: {len(ultimos_tracks)} (PAUSA)"
+                     texto = f"Frame {indice_frame_actual}/{total_frames} - objs: {len(ultimos_tracks)} (PAUSA)"
                      cv2.putText(frame, texto, (ancho - 450, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
             else:

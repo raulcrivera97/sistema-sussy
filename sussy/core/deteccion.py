@@ -149,7 +149,8 @@ def analizar_recorte(
     x1: int, y1: int, x2: int, y2: int, 
     conf_umbral: float = 0.3, # Umbral más bajo para segunda pasada
     modelo_path: str = "yolo11n.pt",
-    clases_permitidas: List[str] = None
+    clases_permitidas: List[str] = None,
+    padding_pct: float = 0.0,
 ) -> Optional[Detection]:
     """
     Recorta la región indicada y pasa YOLO solo a ese trozo.
@@ -158,6 +159,17 @@ def analizar_recorte(
     """
     # Validar coordenadas
     alto, ancho = frame.shape[:2]
+
+    if padding_pct > 0.0:
+        width = x2 - x1
+        height = y2 - y1
+        pad_x = int(max(2, round(width * padding_pct)))
+        pad_y = int(max(2, round(height * padding_pct)))
+        x1 -= pad_x
+        x2 += pad_x
+        y1 -= pad_y
+        y2 += pad_y
+
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(ancho, x2), min(alto, y2)
     
