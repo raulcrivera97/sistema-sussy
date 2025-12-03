@@ -25,6 +25,12 @@ class Config:
     USAR_TRACKER = True
 
     # ==========================================
+    # PRESETS DE CÁMARA
+    # ==========================================
+    CAMARA_PRESET_POR_DEFECTO = None  # Ej: "fija", "orientable", "movil", "movil_plus"
+    CAMARA_PRESET_OVERRIDES = {}      # Dict opcional para forzar ajustes aun usando preset
+
+    # ==========================================
     # FUENTES DE VÍDEO / INGESTA
     # ==========================================
     FUENTE_POR_DEFECTO = None  # Ruta, RTSP, HTTP o índice de webcam. Se puede sobreescribir con --source

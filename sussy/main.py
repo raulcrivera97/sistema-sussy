@@ -15,6 +15,7 @@ from sussy.core.estado_alerta import GestorEstadoDeteccion
 from sussy.core.eventos import GestorEventos
 from sussy.core.fuentes import normalizar_source, abrir_fuente_video
 from sussy.core.movimiento import DetectorMovimiento
+from sussy.core.presets import aplicar_preset_camara, presets_disponibles
 from sussy.core.relevancia import EvaluadorRelevancia
 from sussy.core.seguimiento import TrackerSimple
 from sussy.core.prediccion import PredictorMovimiento
@@ -23,6 +24,8 @@ from sussy.core.registro import RegistradorCSV
 from sussy.core.dataset_utils import guardar_crop
 from sussy.core.estabilidad_camara import MonitorEstabilidadCamara, DiagnosticoEstabilidad
 from sussy.core.texto import dibujar_texto
+
+PRESETS_CAMARA_DISPONIBLES = presets_disponibles()
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +56,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Ruta de archivo CSV para registrar los tracks (opcional).",
     )
+    if PRESETS_CAMARA_DISPONIBLES:
+        parser.add_argument(
+            "--cam-preset",
+            type=str,
+            choices=PRESETS_CAMARA_DISPONIBLES,
+            help=(
+                "Preset rápido de cámara (fija/orientable/movil/movil_plus). "
+                "Sobrescribe Config antes de iniciar el pipeline."
+            ),
+        )
     return parser.parse_args()
 
 
@@ -160,6 +173,22 @@ def procesar_eventos_alerta(
 
 def main() -> None:
     args = parse_args()
+
+    preset_nombre = getattr(args, "cam_preset", None) or Config.CAMARA_PRESET_POR_DEFECTO
+    preset_aplicado = None
+    if preset_nombre:
+        overrides_cfg = getattr(Config, "CAMARA_PRESET_OVERRIDES", None)
+        overrides = dict(overrides_cfg) if isinstance(overrides_cfg, dict) and overrides_cfg else None
+        try:
+            preset_aplicado = aplicar_preset_camara(preset_nombre, overrides=overrides)
+            print(f"Preset de cámara seleccionado: {preset_aplicado.nombre}")
+            print(f" - {preset_aplicado.descripcion}")
+            if overrides:
+                claves = ", ".join(sorted(overrides.keys()))
+                print(f"Overrides manuales aplicados: {claves}")
+        except (ValueError, AttributeError) as exc:
+            LOGGER.error("No se pudo aplicar el preset de cámara '%s': %s", preset_nombre, exc)
+            return
 
     print("Sistema Sussy – pipeline básico (INGESTA → DETECCIÓN → TRACKING → VISUALIZACIÓN)")
     fuente_cli = args.source or args.video
