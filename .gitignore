@@ -12,3 +12,4 @@ __pycache__/
 # Pesos de modelos
 yolo*.pt
 *.pt
+# Nota: *.onnx está manejado por Git LFS (ver .gitattributes)
