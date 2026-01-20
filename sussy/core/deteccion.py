@@ -8,10 +8,12 @@ from ultralytics import YOLO
 from sussy.core.backends import BackendInfo, detectar_backends, describir_backends
 from sussy.core.onnx_inference import ONNXDetector
 
-# Modelo global (se carga solo una vez)
+# Modelo global (se carga solo una vez por configuración)
 _MODEL: Optional[Union[YOLO, ONNXDetector]] = None
 _WARMED_UP = False
 _BACKEND_INFO: Optional[BackendInfo] = None
+_CURRENT_MODEL_PATH: Optional[str] = None  # Para detectar cambios de modelo
+_CURRENT_IMG_SIZE: Optional[int] = None    # Para detectar cambios de tamaño
 
 # Tamaño de entrada para YOLO: más grande = mejor para objetos pequeños (a costa de CPU)
 _IMG_SIZE = 1280
@@ -22,13 +24,52 @@ Detection = Dict[str, Any]
 LOGGER = logging.getLogger("sussy.deteccion")
 
 
+def invalidar_modelo():
+    """
+    Invalida el modelo cargado para forzar recarga en la siguiente inferencia.
+    Llamar cuando cambia el preset de rendimiento o el modelo YOLO.
+    """
+    global _MODEL, _WARMED_UP, _BACKEND_INFO, _CURRENT_MODEL_PATH, _CURRENT_IMG_SIZE
+    
+    if _MODEL is not None:
+        LOGGER.info("Invalidando modelo cargado para permitir recarga")
+        try:
+            if hasattr(_MODEL, 'session'):
+                del _MODEL
+            elif hasattr(_MODEL, 'model'):
+                del _MODEL
+        except Exception:
+            pass
+    
+    _MODEL = None
+    _WARMED_UP = False
+    _BACKEND_INFO = None
+    _CURRENT_MODEL_PATH = None
+    _CURRENT_IMG_SIZE = None
+
+
 def _cargar_modelo(ruta_pesos: str = "yolo11n.pt"):
     """
-    Carga el modelo YOLO una sola vez usando el mejor backend disponible
-    según las preferencias. Aplica warmup ligero para estabilizar tiempos.
+    Carga el modelo YOLO usando el mejor backend disponible según las preferencias.
+    Recarga automáticamente si cambia el modelo o el tamaño de imagen.
     """
-    global _MODEL, _WARMED_UP, _BACKEND_INFO
+    global _MODEL, _WARMED_UP, _BACKEND_INFO, _CURRENT_MODEL_PATH, _CURRENT_IMG_SIZE
     from sussy.config import Config
+    
+    current_modelo = getattr(Config, "YOLO_MODELO", ruta_pesos)
+    current_imgsz = getattr(Config, "YOLO_IMG_SIZE", _IMG_SIZE)
+    
+    necesita_recarga = False
+    if _MODEL is not None:
+        if _CURRENT_MODEL_PATH != current_modelo:
+            LOGGER.info("Modelo cambió de %s a %s - recargando", _CURRENT_MODEL_PATH, current_modelo)
+            necesita_recarga = True
+        elif _CURRENT_IMG_SIZE != current_imgsz:
+            LOGGER.info("Tamaño de imagen cambió de %s a %s - recargando", _CURRENT_IMG_SIZE, current_imgsz)
+            necesita_recarga = True
+    
+    if necesita_recarga:
+        invalidar_modelo()
 
     if _MODEL is None:
         preferencias = getattr(Config, "BACKENDS_PREFERIDOS", ["cuda", "onnx", "cpu"])
@@ -57,7 +98,7 @@ def _cargar_modelo(ruta_pesos: str = "yolo11n.pt"):
 
         for backend in ordenados:
             try:
-        LOGGER.info(
+                LOGGER.info(
                     "Intentando backend: %s (%s). Otros disponibles: %s",
                     backend.nombre,
                     backend.descripcion,
@@ -79,24 +120,26 @@ def _cargar_modelo(ruta_pesos: str = "yolo11n.pt"):
                     modelo = YOLO(backend.modelo_path)
 
                     if backend.tipo == "torch":
-            import torch  # type: ignore
+                        import torch  # type: ignore
 
                         modelo.to(backend.dispositivo)
 
                         if getattr(Config, "YOLO_HALF", False) and str(backend.dispositivo).startswith("cuda"):
-                try:
+                            try:
                                 modelo.model.half()  # type: ignore[attr-defined]
-                    LOGGER.info("Modelo en FP16")
-                except Exception as exc:  # pragma: no cover
-                    LOGGER.warning("No se pudo activar FP16: %s", exc)
+                                LOGGER.info("Modelo en FP16")
+                            except Exception as exc:  # pragma: no cover
+                                LOGGER.warning("No se pudo activar FP16: %s", exc)
 
-            try:
-                torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
-            except Exception:
-                pass
+                        try:
+                            torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
 
                 _MODEL = modelo
                 _BACKEND_INFO = backend
+                _CURRENT_MODEL_PATH = current_modelo
+                _CURRENT_IMG_SIZE = current_imgsz
 
                 if backend.tipo == "onnx":
                     # ONNXDetector ya hace warmup internamente
@@ -104,13 +147,16 @@ def _cargar_modelo(ruta_pesos: str = "yolo11n.pt"):
                 else:
                     _ejecutar_warmup(_MODEL, strict=True)
                     _WARMED_UP = True
+                
+                LOGGER.info("Modelo cargado: %s (imgsz=%s) con backend %s", 
+                           current_modelo, current_imgsz, backend.nombre)
                 break
             except Exception as exc:  # pragma: no cover - queremos seguir probando
                 errores.append(f"{backend.nombre}: {exc}")
                 LOGGER.warning("Fallo al inicializar backend %s -> %s. Probando siguiente.", backend.nombre, exc)
                 _MODEL = None
                 _BACKEND_INFO = None
-        _WARMED_UP = False
+                _WARMED_UP = False
 
         if _MODEL is None or _BACKEND_INFO is None:
             msg = f"No se pudo inicializar ningún backend. Errores: {errores}"

@@ -25,16 +25,61 @@ class BackendInfo:
 
 
 def _inferir_onnx_path(modelo_pt: str, modelo_onnx_cfg: Optional[str]) -> Optional[str]:
-    """Usa la ruta configurada o, si no existe, intenta <modelo>.onnx en el mismo directorio."""
+    """
+    Busca el modelo ONNX correspondiente en múltiples ubicaciones:
+    1. Ruta configurada explícitamente
+    2. Junto al modelo .pt (si tiene ruta)
+    3. En el directorio de trabajo actual
+    4. En el directorio del módulo sussy
+    5. Junto al ejecutable (para PyInstaller)
+    """
     if modelo_onnx_cfg and os.path.isfile(modelo_onnx_cfg):
         return modelo_onnx_cfg
 
-    if modelo_pt:
-        base, _ = os.path.splitext(modelo_pt)
-        cand = f"{base}.onnx"
-        if os.path.isfile(cand):
-            return cand
-
+    if not modelo_pt:
+        return None
+    
+    # Obtener el nombre base del modelo (sin extensión)
+    nombre_base = os.path.splitext(os.path.basename(modelo_pt))[0]
+    nombre_onnx = f"{nombre_base}.onnx"
+    
+    # Lista de directorios donde buscar
+    directorios_busqueda = []
+    
+    # 1. Directorio del modelo .pt (si tiene ruta)
+    dir_modelo = os.path.dirname(modelo_pt)
+    if dir_modelo:
+        directorios_busqueda.append(os.path.abspath(dir_modelo))
+    
+    # 2. Directorio de trabajo actual
+    directorios_busqueda.append(os.getcwd())
+    
+    # 3. Directorio del módulo sussy
+    try:
+        import sussy
+        dir_sussy = os.path.dirname(os.path.dirname(os.path.abspath(sussy.__file__)))
+        directorios_busqueda.append(dir_sussy)
+    except Exception:
+        pass
+    
+    # 4. Directorio del ejecutable (PyInstaller)
+    import sys
+    if getattr(sys, 'frozen', False):
+        directorios_busqueda.append(os.path.dirname(sys.executable))
+    
+    # 5. Directorio del script principal
+    if hasattr(sys, 'argv') and sys.argv[0]:
+        dir_script = os.path.dirname(os.path.abspath(sys.argv[0]))
+        directorios_busqueda.append(dir_script)
+    
+    # Buscar en todos los directorios
+    for directorio in directorios_busqueda:
+        candidato = os.path.join(directorio, nombre_onnx)
+        if os.path.isfile(candidato):
+            LOGGER.debug("Modelo ONNX encontrado: %s", candidato)
+            return candidato
+    
+    LOGGER.debug("No se encontró %s en: %s", nombre_onnx, directorios_busqueda)
     return None
 
 

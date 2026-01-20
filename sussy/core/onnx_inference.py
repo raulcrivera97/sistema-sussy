@@ -89,6 +89,24 @@ class ONNXDetector:
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
         self.output_names = [o.name for o in self.session.get_outputs()]
+        
+        # Detectar el tamaño de entrada real del modelo ONNX
+        # El shape suele ser [batch, channels, height, width] o similar
+        model_input_size = None
+        if self.input_shape and len(self.input_shape) >= 4:
+            # Intentar obtener height/width del shape
+            h, w = self.input_shape[2], self.input_shape[3]
+            if isinstance(h, int) and isinstance(w, int) and h > 0 and w > 0:
+                model_input_size = h  # Asumimos cuadrado
+                if model_input_size != input_size:
+                    LOGGER.warning(
+                        "El modelo ONNX espera entrada %dx%d pero se solicitó %d. "
+                        "Usando el tamaño del modelo ONNX.",
+                        model_input_size, model_input_size, input_size
+                    )
+                    self.input_size = model_input_size
+        
+        LOGGER.info("ONNXDetector inicializado: input_size=%d, shape=%s", self.input_size, self.input_shape)
 
         # Preparar IO binding para reducir copias CPU<->GPU
         self._use_io_binding = "DmlExecutionProvider" in active_providers

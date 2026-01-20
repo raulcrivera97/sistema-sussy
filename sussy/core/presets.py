@@ -89,61 +89,76 @@ PRESETS_CAMARA: Dict[str, PresetCamara] = {
 }
 
 PRESETS_RENDIMIENTO: Dict[str, PresetRendimiento] = {
-    "minimo": PresetRendimiento(
-        clave="minimo",
-        nombre="Rendimiento mínimo",
+    "ultraligero": PresetRendimiento(
+        clave="ultraligero",
+        nombre="Ultraligero (GPU)",
         descripcion=(
-            "Minimiza consumo: modelo ligero, skip agresivo y menor imgsz."
+            "Máxima velocidad: modelo nano en GPU. ~50+ FPS"
         ),
         ajustes={
             "YOLO_MODELO": "yolo11n.pt",
-            "YOLO_IMG_SIZE": 640,
-            "SKIP_FRAMES_DEFECTO": 3,
+            "YOLO_IMG_SIZE": 512,  # yolo11n.onnx exportado a 512
+            "SKIP_FRAMES_DEFECTO": 2,
             "USAR_DETECTOR_MOVIMIENTO": False,
-            "USAR_MONITOR_ESTABILIDAD": False,
+            "USAR_PREDICCION_MOVIMIENTO": False,
             "USAR_FILTRO_IA_EN_MOVIMIENTO": False,
-            "GUARDAR_CROPS_ENTRENAMIENTO": False,
+        },
+    ),
+    "rapido": PresetRendimiento(
+        clave="rapido",
+        nombre="Rápido (GPU)",
+        descripcion=(
+            "Buena velocidad con modelo nano en GPU. ~30-40 FPS"
+        ),
+        ajustes={
+            "YOLO_MODELO": "yolo11n.pt",
+            "YOLO_IMG_SIZE": 512,  # Usar el mismo tamaño del ONNX
+            "SKIP_FRAMES_DEFECTO": 1,
+            "USAR_DETECTOR_MOVIMIENTO": True,
+            "USAR_PREDICCION_MOVIMIENTO": False,
+            "USAR_FILTRO_IA_EN_MOVIMIENTO": False,
         },
     ),
     "equilibrado": PresetRendimiento(
         clave="equilibrado",
-        nombre="Rendimiento equilibrado",
+        nombre="Equilibrado (GPU)",
         descripcion=(
-            "Balancea coste y calidad: modelo ligero, imgsz medio y skip moderado."
+            "Balance velocidad/precisión con modelo grande. ~15-25 FPS"
         ),
         ajustes={
-            "YOLO_MODELO": "yolo11n.pt",
-            "YOLO_IMG_SIZE": 960,
+            "YOLO_MODELO": "yolo11x.pt",
+            "YOLO_IMG_SIZE": 960,  # yolo11x.onnx exportado a 960
             "SKIP_FRAMES_DEFECTO": 2,
+            "USAR_DETECTOR_MOVIMIENTO": True,
+        },
+    ),
+    "calidad": PresetRendimiento(
+        clave="calidad",
+        nombre="Alta calidad (GPU)",
+        descripcion=(
+            "Mayor precisión con modelo grande. ~10-15 FPS"
+        ),
+        ajustes={
+            "YOLO_MODELO": "yolo11x.pt",
+            "YOLO_IMG_SIZE": 960,
+            "SKIP_FRAMES_DEFECTO": 1,
+            "USAR_DETECTOR_MOVIMIENTO": True,
+            "USAR_PREDICCION_MOVIMIENTO": True,
         },
     ),
     "maximo": PresetRendimiento(
         clave="maximo",
-        nombre="Rendimiento máximo",
+        nombre="Máxima precisión (GPU)",
         descripcion=(
-            "Calidad máxima: modelo grande y sin salto de frames."
+            "Calidad máxima, todos los módulos activos. ~5-10 FPS"
         ),
         ajustes={
             "YOLO_MODELO": "yolo11x.pt",
-            "YOLO_IMG_SIZE": 1280,
+            "YOLO_IMG_SIZE": 960,
             "SKIP_FRAMES_DEFECTO": 1,
-        },
-    ),
-    "ultraligero": PresetRendimiento(
-        clave="ultraligero",
-        nombre="Ultraligero (edge)",
-        descripcion=(
-            "Para CPUs/NPU débiles: modelo nano, imgsz pequeño y skip alto."
-        ),
-        ajustes={
-            "YOLO_MODELO": "yolo11n.pt",
-            "YOLO_IMG_SIZE": 512,
-            "SKIP_FRAMES_DEFECTO": 4,
-            "USAR_MONITOR_ESTABILIDAD": False,
-            "USAR_DETECTOR_MOVIMIENTO": False,
-            "USAR_PREDICCION_MOVIMIENTO": False,
-            "USAR_FILTRO_IA_EN_MOVIMIENTO": False,
-            "GUARDAR_CROPS_ENTRENAMIENTO": False,
+            "USAR_DETECTOR_MOVIMIENTO": True,
+            "USAR_PREDICCION_MOVIMIENTO": True,
+            "USAR_FILTRO_IA_EN_MOVIMIENTO": True,
         },
     ),
 }

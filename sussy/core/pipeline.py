@@ -25,6 +25,7 @@ from sussy.core.registro import RegistradorCSV
 from sussy.core.seguimiento import TrackerSimple
 from sussy.core.utilidades_iou import calcular_iou
 from sussy.core.texto import dibujar_texto
+from sussy.core.apariencia import crear_extractor_apariencia
 
 LOGGER = configurar_entorno_privado(logging.getLogger("sussy.pipeline"))
 
@@ -161,8 +162,10 @@ class SussyPipeline:
         if self.skip_frames < 1:
             self.skip_frames = 1
 
-        # Normalizar fuente
-        fuente_normalizada = normalizar_source(source) or normalizar_source(Config.FUENTE_POR_DEFECTO)
+        # Normalizar fuente (usar 'is None' porque 0 es un índice válido de webcam)
+        fuente_normalizada = normalizar_source(source)
+        if fuente_normalizada is None:
+            fuente_normalizada = normalizar_source(Config.FUENTE_POR_DEFECTO)
         if fuente_normalizada is None:
             raise ValueError("No se especificó fuente (--source) ni Config.FUENTE_POR_DEFECTO")
 
@@ -279,17 +282,56 @@ class SussyPipeline:
         self.tracker = None
         self.predictor_movimiento = None
         self.crear_tracker = None
+        self.extractor_apariencia = None
 
         if Config.USAR_TRACKER:
+            # Configuración de estabilización de clases y Re-ID
+            usar_estab = getattr(Config, "TRACKER_USAR_ESTABILIZACION_CLASES", True)
+            usar_reid = getattr(Config, "TRACKER_USAR_REID", False)
+            
             def _crear_tracker() -> TrackerSimple:
-                return TrackerSimple(
+                tracker = TrackerSimple(
                     max_dist=Config.TRACKER_MATCH_DIST,
                     max_frames_lost=Config.TRACKER_MAX_FRAMES_LOST,
                     iou_threshold=Config.TRACKER_IOU_THRESHOLD,
+                    usar_prediccion=getattr(Config, "TRACKER_USAR_PREDICCION", True),
+                    prediccion_factor=getattr(Config, "TRACKER_PREDICCION_FACTOR", 0.8),
+                    aceleracion_max=getattr(Config, "TRACKER_ACELERACION_MAX", 5.0),
+                    # Nuevos parámetros v3
+                    usar_estabilizacion_clases=usar_estab,
+                    clase_decay=getattr(Config, "TRACKER_CLASE_DECAY", 0.92),
+                    clase_min_frames=getattr(Config, "TRACKER_CLASE_MIN_FRAMES", 3),
+                    usar_reid=usar_reid,
+                    reid_max_edad=getattr(Config, "TRACKER_REID_MAX_EDAD", 300),
+                    reid_umbral=getattr(Config, "TRACKER_REID_UMBRAL", 0.60),
                 )
+                return tracker
 
             self.crear_tracker = _crear_tracker
             self.tracker = self.crear_tracker()
+            
+            # Crear extractor de apariencia si Re-ID está activado
+            if usar_reid:
+                try:
+                    tipo_extractor = getattr(Config, "TRACKER_APARIENCIA_TIPO", "simple")
+                    self.extractor_apariencia = crear_extractor_apariencia(tipo=tipo_extractor)
+                    self.tracker.set_extractor_apariencia(self.extractor_apariencia)
+                    LOGGER.info(
+                        "Re-ID activado con extractor '%s' (umbral=%.2f, max_edad=%d frames)",
+                        tipo_extractor,
+                        getattr(Config, "TRACKER_REID_UMBRAL", 0.60),
+                        getattr(Config, "TRACKER_REID_MAX_EDAD", 300),
+                    )
+                except Exception as e:
+                    LOGGER.warning("No se pudo inicializar extractor de apariencia: %s", e)
+                    self.extractor_apariencia = None
+            
+            if usar_estab:
+                LOGGER.info(
+                    "Estabilización de clases activada (decay=%.2f, min_frames=%d)",
+                    getattr(Config, "TRACKER_CLASE_DECAY", 0.92),
+                    getattr(Config, "TRACKER_CLASE_MIN_FRAMES", 3),
+                )
 
             if Config.USAR_PREDICCION_MOVIMIENTO:
                 self.predictor_movimiento = PredictorMovimiento(
@@ -531,6 +573,8 @@ class SussyPipeline:
 
             if Config.GUARDAR_CROPS_ENTRENAMIENTO:
                 clase_guardar = detectado_en_crop["clase"] if detectado_en_crop else "unknown"
+                # Usar detección validada si existe, sino la de movimiento
+                det_para_guardar = detectado_en_crop if detectado_en_crop else d_mov
                 guardar_crop(
                     frame,
                     d_mov["x1"],
@@ -540,12 +584,18 @@ class SussyPipeline:
                     clase_guardar,
                     Config.RUTA_DATASET_CAPTURE,
                     padding_pct=Config.MOVIMIENTO_CROP_PADDING_PCT,
+                    det=det_para_guardar,
+                    frame_idx=self.indice_frame_actual,
+                    fuente=str(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) if self.cap else "",
                 )
 
         detecciones_yolo.extend(nuevas_detecciones_ia)
 
         detecciones = combinar_detecciones(detecciones_yolo, detecciones_mov)
-        detecciones = self.evaluador_relevancia.filtrar(detecciones, frame.shape)
+        # Pasar tracks anteriores para análisis de trayectoria
+        detecciones = self.evaluador_relevancia.filtrar(
+            detecciones, frame.shape, tracks=self.ultimos_tracks
+        )
 
         # Anomalías
         anomalia_detectada = False
@@ -563,9 +613,24 @@ class SussyPipeline:
 
         activacion_anomalia = max(1, Config.MOVIMIENTO_ANOMALIA_FRAMES_ACTIVACION)
         if self.anomalia_consecutiva >= activacion_anomalia:
-            self.anomalia_motivo_actual = "anomalia"
-            self.numero_detecciones_anomalia = total_detecciones
+            # Determinar tipo de anomalía y conteo apropiado
+            total_pd = sum(1 for d in detecciones if d.get("clase") == "posible_dron")
+            es_anomalia_pd = (
+                Config.MOVIMIENTO_ANOMALIA_POSIBLE_DRON
+                and total_pd >= Config.MOVIMIENTO_ANOMALIA_POSIBLE_DRON
+            )
+            if es_anomalia_pd:
+                self.anomalia_motivo_actual = "anomalia_posible_dron"
+                conteo_anomalia = total_pd
+            else:
+                self.anomalia_motivo_actual = "anomalia"
+                conteo_anomalia = total_detecciones
+            
+            # IMPORTANTE: Activar bloqueo ANTES de asignar contador
+            # porque _activar_bloqueo_movimiento puede resetear el contador
             self._activar_bloqueo_movimiento(self.anomalia_motivo_actual)
+            self.numero_detecciones_anomalia = conteo_anomalia
+            
             self.camara_mov_anomalia_restante = max(
                 self.camara_mov_anomalia_restante,
                 Config.MOVIMIENTO_ANOMALIA_FRAMES_ENFRIAMIENTO,
@@ -578,7 +643,8 @@ class SussyPipeline:
         # Tracking
         tracks: List[Dict[str, Any]] = []
         if self.tracker:
-            tracks = self.tracker.actualizar(detecciones)
+            # Pasar frame para Re-ID (extracción de embeddings visuales)
+            tracks = self.tracker.actualizar(detecciones, frame=frame)
             if self.predictor_movimiento:
                 self.predictor_movimiento.preparar_zonas(tracks, frame.shape)
         else:
@@ -659,14 +725,14 @@ class SussyPipeline:
         elif motivo == "rafaga":
             msg = "CÁMARA EN MOVIMIENTO (ráfaga de blobs)"
         elif motivo == "anomalia":
-            # Si el monitor de estabilidad está desactivado, mostrar mensaje diferente
+            num_det = self.numero_detecciones_anomalia
             if not Config.USAR_MONITOR_ESTABILIDAD:
-                num_det = self.numero_detecciones_anomalia
                 msg = f"DETECCIONES MOVIMIENTO MASIVAS: {num_det}"
             else:
-                msg = "CÁMARA EN MOVIMIENTO (detecciones masivas)"
+                msg = f"CÁMARA EN MOVIMIENTO (detecciones masivas: {num_det})"
         elif motivo == "anomalia_posible_dron":
-            msg = "CÁMARA EN MOVIMIENTO (exceso posible_dron)"
+            num_pd = self.numero_detecciones_anomalia
+            msg = f"CÁMARA EN MOVIMIENTO (posible_dron: {num_pd})"
         else:
             msg = "CÁMARA EN MOVIMIENTO"
 

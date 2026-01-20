@@ -158,11 +158,71 @@ class Config:
     # MEJORAS (filtro IA + dataset)
     # ==========================================
     USAR_FILTRO_IA_EN_MOVIMIENTO = True
-    GUARDAR_CROPS_ENTRENAMIENTO = True
+    GUARDAR_CROPS_ENTRENAMIENTO = False  # Se configura manualmente según necesidad
     RUTA_DATASET_CAPTURE = "data/dataset_capture"
 
     # Auto-tuning según coste observado
     AUTO_DESACTIVAR_FILTRO_IA = True
     LIMITE_MS_INFERENCIA = 120.0  # desactiva filtro IA en movimiento si la media supera este valor
+
+    # ==========================================
+    # CALIDAD DE DATASET (filtros para crops)
+    # ==========================================
+    CROP_GUARDAR_SOLO_VALIDADOS = False   # True = solo guardar si YOLO confirmó algo
+    CROP_MIN_SCORE = 0.35                  # Score mínimo para guardar crop validado
+    CROP_MIN_AREA_PX = 100                 # Área mínima en píxeles para guardar
+    CROP_MAX_AREA_PCT = 0.15               # Área máxima como % del frame (evitar fondos)
+    CROP_GUARDAR_METADATOS = True          # Guardar JSON con info del crop
+    CROP_FILTRAR_VEGETACION = True         # Aplicar filtro anti-vegetación
+
+    # ==========================================
+    # FILTRO ANTI-VEGETACIÓN
+    # ==========================================
+    VEGETACION_RATIO_VERDE_MIN = 0.25      # Si >25% es verde, probable vegetación
+    VEGETACION_RATIO_MARRON_MIN = 0.30     # Si >30% es marrón, probable rama/tronco
+    VEGETACION_DESVIACION_COLOR_MIN = 15   # Desviación estándar mínima (objetos uniformes = artificial)
+    VEGETACION_BORDES_MIN_RATIO = 0.02     # Ratio mínimo de bordes (drones tienen bordes definidos)
+
+    # ==========================================
+    # HEURÍSTICAS AVANZADAS DRON
+    # ==========================================
+    DRON_ASPECTO_MIN = 0.5                 # Ratio mínimo ancho/alto (drones son compactos)
+    DRON_ASPECTO_MAX = 2.5                 # Ratio máximo ancho/alto
+    DRON_TRAYECTORIA_FRAMES = 5            # Frames para evaluar linealidad de trayectoria
+    DRON_TRAYECTORIA_LINEALIDAD_MIN = 0.7  # 0-1, cuán lineal es el movimiento (1=perfectamente recto)
+    DRON_PERSISTENCIA_CLASE_FRAMES = 3     # Frames como posible_dron antes de confirmar
+
+    # ==========================================
+    # TRACKER MEJORADO
+    # ==========================================
+    TRACKER_USAR_PREDICCION = True         # Usar velocidad para predecir posición
+    TRACKER_PREDICCION_FACTOR = 0.8        # Factor de confianza en predicción (0-1)
+    TRACKER_ACELERACION_MAX = 5.0          # Cambio máximo de velocidad por frame
+
+    # ==========================================
+    # ESTABILIZACIÓN DE CLASES (v3)
+    # ==========================================
+    # Evita que la clase de un objeto cambie constantemente entre frames.
+    # Usa votación ponderada con decay temporal para determinar la clase "estable".
+    TRACKER_USAR_ESTABILIZACION_CLASES = True   # Activar estabilización de clases
+    TRACKER_CLASE_DECAY = 0.92                   # Decay para clases no observadas (0.9-0.95 recomendado)
+                                                 # Valores altos = más memoria, más estable
+                                                 # Valores bajos = más reactivo a cambios reales
+    TRACKER_CLASE_MIN_FRAMES = 3                 # Frames mínimos antes de usar clase estabilizada
+
+    # ==========================================
+    # RE-IDENTIFICACIÓN (Re-ID) VISUAL
+    # ==========================================
+    # Permite re-identificar objetos que salen y vuelven a entrar en el frame.
+    # Usa embeddings visuales (histograma color, textura) que funcionan en CPU.
+    TRACKER_USAR_REID = True                     # Activar Re-ID visual
+    TRACKER_REID_MAX_EDAD = 300                  # Frames máximos para recordar tracks (~10s a 30fps)
+    TRACKER_REID_UMBRAL = 0.60                   # Similitud mínima para Re-ID (0.5-0.7 recomendado)
+    TRACKER_REID_MAX_GUARDADOS = 50              # Máximo de tracks en la galería de Re-ID
+
+    # Tipo de extractor de apariencia: "simple" o "multiescala"
+    # - simple: más rápido, suficiente para la mayoría de casos
+    # - multiescala: más robusto pero ~3x más lento
+    TRACKER_APARIENCIA_TIPO = "simple"
 
 
