@@ -171,6 +171,13 @@ class EvaluadorRelevancia:
         area_total: int,
         tracks: Optional[List[Dict]] = None,
     ) -> Detection | None:
+        """
+        Evalúa si un blob de movimiento es relevante como ZONA DE ATENCIÓN.
+        
+        IMPORTANTE: Este método NUNCA clasifica como "posible_dron".
+        Solo marca objetos en movimiento que YOLO no identificó como "movimiento"
+        para indicar que hay algo interesante que no se pudo clasificar.
+        """
         x1, y1, x2, y2 = det["x1"], det["y1"], det["x2"], det["y2"]
         w = max(1, x2 - x1)
         h = max(1, y2 - y1)
@@ -191,7 +198,18 @@ class EvaluadorRelevancia:
 
         aspecto = w / max(1, h)
 
-        # ========== REGLAS DE DESCARTE ==========
+        # ========== REGLAS DE DESCARTE (ajustadas para no ser demasiado estrictas) ==========
+        
+        # Regla 0: descartar blobs extremadamente pequeños (ruido de píxeles)
+        area_min_rel = getattr(Config, "RELEVANCIA_AREA_DRON_MIN", 0.0001)
+        if area_rel < area_min_rel:
+            return None
+        
+        # Regla 0b: descartar blobs con área absoluta muy pequeña
+        # Reducido a 25 px para permitir objetos pequeños en el cielo
+        area_min_px = getattr(Config, "MOVIMIENTO_AREA_MIN", 40)
+        if area_px < area_min_px:
+            return None
 
         # Regla 1: descartar oscilaciones grandes pero lentas (ramas, paredes)
         if area_rel >= Config.RELEVANCIA_AREA_RAMA_MIN and velocidad < Config.RELEVANCIA_VEL_MIN:
@@ -207,82 +225,30 @@ class EvaluadorRelevancia:
             or aspecto <= (1 / Config.RELEVANCIA_ASPECTO_RAMAS)
         ) and velocidad < (Config.RELEVANCIA_VEL_MIN * 1.2) and area_rel > Config.RELEVANCIA_AREA_DRON_MAX:
             return None
+        
+        # Regla 4: blobs con muy poca persistencia no pasan
+        # Reducido a 3 frames para ser menos estricto
+        min_frames_relevante = getattr(Config, "MOVIMIENTO_MIN_FRAMES", 5)
+        min_frames_mostrar = max(3, min_frames_relevante - 2)
+        if frames_vivos < min_frames_mostrar:
+            return None
 
-        # ========== DETECCIÓN DE POSIBLE DRON ==========
-
-        # Heurísticas avanzadas para drones
-        aspecto_min = getattr(Config, "DRON_ASPECTO_MIN", 0.5)
-        aspecto_max = getattr(Config, "DRON_ASPECTO_MAX", 2.5)
-        persistencia_frames = getattr(Config, "DRON_PERSISTENCIA_CLASE_FRAMES", 3)
-        linealidad_min = getattr(Config, "DRON_TRAYECTORIA_LINEALIDAD_MIN", 0.7)
-
-        es_compacto = aspecto_min <= aspecto <= aspecto_max
-        es_pequeno = area_rel <= Config.RELEVANCIA_AREA_DRON_MAX
-        tiene_movimiento = velocidad >= Config.RELEVANCIA_VEL_MIN
-        es_persistente = frames_vivos >= Config.MOVIMIENTO_MIN_FRAMES
-
-        # Buscar track correspondiente para análisis de trayectoria
-        linealidad = 0.5
-        track_id = -1
-        if tracks:
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            for t in tracks:
-                tbox = t.get("box", [0, 0, 0, 0])
-                tcx = (tbox[0] + tbox[2]) / 2
-                tcy = (tbox[1] + tbox[3]) / 2
-                if abs(cx - tcx) < 20 and abs(cy - tcy) < 20:
-                    track_id = t.get("id", -1)
-                    break
-            
-            if track_id > 0:
-                linealidad = self.historial_trayectoria.obtener_linealidad(track_id)
-
-        tiene_trayectoria_lineal = linealidad >= linealidad_min
-
-        # Clasificación como posible_dron
-        if (
-            es_pequeno
-            and es_compacto
-            and tiene_movimiento
-            and es_persistente
-            and not toca_borde
-        ):
-            # Bonus si tiene trayectoria lineal
-            score_base = max(det.get("score", 0.0), 0.35 + velocidad * 0.05)
-            if tiene_trayectoria_lineal:
-                score_base = min(0.95, score_base + 0.15)
-            
-            # Registrar clase y verificar persistencia
-            if track_id > 0:
-                frames_como_dron = self.contador_clase.registrar(track_id, "posible_dron")
-                
-                # Solo confirmar si ha sido posible_dron por suficientes frames
-                if frames_como_dron >= persistencia_frames:
-                    det["clase"] = "posible_dron"
-                    det["relevante"] = True
-                    det["score"] = min(0.99, score_base + 0.1)
-                    det["descripcion"] = f"Dron probable (linealidad={linealidad:.2f}, frames={frames_como_dron})"
-                    det["linealidad_trayectoria"] = linealidad
-                    return det
-                else:
-                    # Aún no confirmado, marcar como candidato
-                    det["clase"] = "posible_dron"
-                    det["relevante"] = True
-                    det["score"] = score_base
-                    det["descripcion"] = f"Candidato a dron (frames={frames_como_dron}/{persistencia_frames})"
-                    det["linealidad_trayectoria"] = linealidad
-                    return det
-            else:
-                # Sin track, usar heurística básica
-                det["clase"] = "posible_dron"
-                det["relevante"] = True
-                det["score"] = score_base
-                det["descripcion"] = "Movimiento compacto con patrón compatible con dron"
-                return det
-
-        # Por defecto lo marcamos como movimiento relevante para dejar rastro
-        det["clase"] = det.get("clase") or "movimiento"
+        # ========== OBJETO NO IDENTIFICADO EN MOVIMIENTO ==========
+        # Si llegamos aquí, el blob pasa los filtros básicos.
+        # Lo marcamos como "movimiento" para indicar que hay algo interesante
+        # que la IA no pudo identificar.
+        
+        det["clase"] = "movimiento"
         det["relevante"] = True
+        # Score basado en características: más alto si tiene velocidad y persistencia
+        base_score = 0.4
+        if velocidad >= Config.RELEVANCIA_VEL_MIN:
+            base_score += 0.1
+        if frames_vivos >= min_frames_relevante:
+            base_score += 0.1
+        det["score"] = min(0.6, base_score)  # Cap en 0.6 para que sea claramente menor que detecciones IA
+        det["descripcion"] = "Objeto en movimiento no identificado"
+        
         return det
 
     def resetear(self) -> None:

@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sistema-sussy"
+version = "1.0.0"
+description = "Sistema de detección y seguimiento de drones mediante visión por computadora"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Proyecto Sussy"}
+]
+keywords = ["computer-vision", "yolo", "drone-detection", "object-tracking"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0,<2.0.0",
+    "ultralytics>=8.0.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "onnxruntime>=1.16.0",
+    "onnxruntime-directml>=1.16.0",
+    "PyYAML>=6.0",
+    "Pillow>=9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+training = [
+    "ray[tune]>=2.0.0",
+    "wandb>=0.15.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/raulcrivera97/sistema-sussy"
+Documentation = "https://github.com/raulcrivera97/sistema-sussy#readme"
+Repository = "https://github.com/raulcrivera97/sistema-sussy"
+
+[tool.setuptools]
+packages = ["sussy"]
+
+[tool.setuptools.package-data]
+"sussy" = ["*.yaml", "*.yml"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]  # Line too long (manejado por black)

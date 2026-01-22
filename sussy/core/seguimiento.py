@@ -25,7 +25,16 @@ class HistorialClases:
     Cada nueva clasificación incrementa el peso de esa clase, mientras que
     las demás clases sufren un decay temporal. La clase "estable" es la
     de mayor peso acumulado.
+    
+    IMPORTANTE: Ciertas clases (como "movimiento") son temporales y no deben
+    prevalecer en el historial sobre clases confirmadas por IA.
     """
+    
+    # Clases que NO deben ser estabilizadas (son zonas de atención, no objetos)
+    CLASES_NO_ESTABILIZABLES = {"movimiento", "unknown", "ruido"}
+    
+    # Clases que solo YOLO puede asignar (no heurísticas)
+    CLASES_SOLO_IA = {"drone", "bird", "airplane", "person", "car", "truck", "bus", "motorcycle", "bicycle"}
     
     def __init__(self, decay: float = 0.92, min_frames_estable: int = 3):
         """
@@ -62,18 +71,52 @@ class HistorialClases:
             if historial[c] < 0.01:
                 del historial[c]
         
-        # Incrementar peso de la clase actual (ponderado por score)
-        peso_nuevo = 1.0 + (score - 0.5) * 0.5  # score 0.5->1.0, score 1.0->1.25
-        historial[clase] += peso_nuevo
+        # Si la clase es "movimiento" o similar, NO la añadimos al historial
+        # pero seguimos retornando la clase estable si existe
+        if clase in self.CLASES_NO_ESTABILIZABLES:
+            # Si hay historial con clases IA, usar esa
+            if historial:
+                clases_ia = {c: w for c, w in historial.items() if c in self.CLASES_SOLO_IA}
+                if clases_ia:
+                    return max(clases_ia.keys(), key=lambda c: clases_ia[c])
+                # Si no hay clases IA pero hay otras, devolver la más pesada
+                return max(historial.keys(), key=lambda c: historial[c])
+            # Sin historial, devolver la clase tal cual
+            return clase
+        
+        # Para "posible_dron": solo registrar con peso reducido y NUNCA como clase dominante
+        # si hay clases IA en el historial
+        if clase == "posible_dron":
+            # Si ya hay clases IA confirmadas, ignorar posible_dron
+            clases_ia = {c: w for c, w in historial.items() if c in self.CLASES_SOLO_IA}
+            if clases_ia:
+                return max(clases_ia.keys(), key=lambda c: clases_ia[c])
+            # Si no hay clases IA, registrar con peso muy reducido
+            peso_nuevo = 0.3 * score  # Peso muy bajo para posible_dron
+            historial[clase] += peso_nuevo
+        else:
+            # Incrementar peso de la clase actual (ponderado por score)
+            peso_nuevo = 1.0 + (score - 0.5) * 0.5  # score 0.5->1.0, score 1.0->1.25
+            historial[clase] += peso_nuevo
         
         # Determinar clase estable
         if not historial:
             return clase
         
-        clase_estable = max(historial.keys(), key=lambda c: historial[c])
+        # Preferir clases confirmadas por IA sobre heurísticas
+        clases_ia = {c: w for c, w in historial.items() if c in self.CLASES_SOLO_IA}
+        if clases_ia:
+            clase_estable = max(clases_ia.keys(), key=lambda c: clases_ia[c])
+        else:
+            clase_estable = max(historial.keys(), key=lambda c: historial[c])
         
         # Si el track es muy nuevo, usar la clase detectada directamente
+        # (pero nunca "movimiento" si hay algo mejor)
         if self._frames_por_track[track_id] < self.min_frames_estable:
+            if clase not in self.CLASES_NO_ESTABILIZABLES:
+                return clase
+            elif historial:
+                return clase_estable
             return clase
         
         return clase_estable

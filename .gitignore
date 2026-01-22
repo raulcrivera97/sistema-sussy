@@ -9,7 +9,54 @@ __pycache__/
 *.log
 *.csv
 
-# Pesos de modelos
+# Pesos de modelos y archivos grandes
 yolo*.pt
 *.pt
-# Nota: *.onnx está manejado por Git LFS (ver .gitattributes)
+*.onnx
+*.pth
+*.h5
+*.pb
+*.tflite
+
+# Archivos de video (demasiado grandes)
+*.mp4
+*.avi
+*.mov
+*.MOV
+*.mkv
+*.flv
+*.wmv
+
+# Archivos de imagen grandes (datasets)
+datasets/**/*.jpg
+datasets/**/*.png
+datasets/**/*.jpeg
+datasets/**/*.JPG
+datasets/**/*.PNG
+!datasets/**/README.md
+!datasets/**/*.yaml
+!datasets/**/*.yml
+
+# Archivos compilados y ejecutables
+*.exe
+*.dll
+*.so
+*.dylib
+*.pyd
+
+# Archivos de build y distribución
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Archivos temporales y caché
+*.cache
+*.tmp
+*.temp
+runs/**/*.jpg
+runs/**/*.png
+
+# Archivos de proyecto grandes
+*.prproj
+*.prin

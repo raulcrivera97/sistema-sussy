@@ -23,7 +23,7 @@ from sussy.core.presets import (
 from sussy.core.relevancia import EvaluadorRelevancia
 from sussy.core.registro import RegistradorCSV
 from sussy.core.seguimiento import TrackerSimple
-from sussy.core.utilidades_iou import calcular_iou
+from sussy.core.utilidades_iou import calcular_iou, centro_contenido_en_caja, box_contenido_en_caja
 from sussy.core.texto import dibujar_texto
 from sussy.core.apariencia import crear_extractor_apariencia
 
@@ -542,6 +542,8 @@ class SussyPipeline:
 
         # Filtro IA sobre blobs de movimiento huérfanos + guardado de crops
         nuevas_detecciones_ia: List[Dict[str, Any]] = []
+        blobs_filtrados: List[Dict[str, Any]] = []  # Blobs que pasan los filtros de contención
+        
         usar_filtro_mov = Config.USAR_FILTRO_IA_EN_MOVIMIENTO
         if (
             usar_filtro_mov
@@ -550,10 +552,68 @@ class SussyPipeline:
         ):
             usar_filtro_mov = False
 
-        for d_mov in detecciones_mov:
-            solapa_yolo = any(calcular_iou(d_mov, d_yolo) > 0.1 for d_yolo in detecciones_yolo)
-            if solapa_yolo:
+        # Clases YOLO que generan movimiento interno (personas moviéndose, coches, etc.)
+        # Los blobs de movimiento dentro de estas detecciones son falsos positivos
+        clases_con_movimiento_interno = getattr(
+            Config, "CLASES_CON_MOVIMIENTO_INTERNO",
+            ["person", "car", "motorcycle", "bus", "truck", "bicycle", "bird", "dog", "cat", "horse"]
+        )
+        margen_contencion = getattr(Config, "MOVIMIENTO_MARGEN_CONTENCION", 0.15)
+        umbral_contencion = getattr(Config, "MOVIMIENTO_UMBRAL_CONTENCION", 0.6)
+
+        # OPTIMIZADO: Una sola pasada para filtrar blobs
+        # Pre-calcular cajas YOLO de clases sensibles (solo una vez)
+        cajas_sensibles = []
+        for d_yolo in detecciones_yolo:
+            if d_yolo.get("clase", "") in clases_con_movimiento_interno:
+                x1, y1, x2, y2 = d_yolo["x1"], d_yolo["y1"], d_yolo["x2"], d_yolo["y2"]
+                cajas_sensibles.append((x1, y1, x2, y2, (x2-x1)*(y2-y1)))
+        
+        # Contar blobs por caja (solo si hay cajas sensibles)
+        blob_en_caja = {}  # idx_blob -> idx_caja
+        conteo_por_caja = [0] * len(cajas_sensibles)
+        
+        if cajas_sensibles:
+            for idx_mov, d_mov in enumerate(detecciones_mov):
+                cx = (d_mov["x1"] + d_mov["x2"]) * 0.5
+                cy = (d_mov["y1"] + d_mov["y2"]) * 0.5
+                
+                for idx_caja, (x1, y1, x2, y2, _) in enumerate(cajas_sensibles):
+                    if x1 <= cx <= x2 and y1 <= cy <= y2:
+                        blob_en_caja[idx_mov] = idx_caja
+                        conteo_por_caja[idx_caja] += 1
+                        break
+        
+        # Cajas con múltiples blobs = movimiento corporal
+        cajas_con_movimiento_corporal = {i for i, c in enumerate(conteo_por_caja) if c >= 2}
+        
+        for idx_mov, d_mov in enumerate(detecciones_mov):
+            # Filtro 0: Movimiento corporal (múltiples blobs en misma persona)
+            if idx_mov in blob_en_caja and blob_en_caja[idx_mov] in cajas_con_movimiento_corporal:
                 continue
+            
+            # Filtro 1: IoU alto con alguna detección YOLO
+            mx1, my1, mx2, my2 = d_mov["x1"], d_mov["y1"], d_mov["x2"], d_mov["y2"]
+            m_area = (mx2 - mx1) * (my2 - my1)
+            
+            skip = False
+            for d_yolo in detecciones_yolo:
+                yx1, yy1, yx2, yy2 = d_yolo["x1"], d_yolo["y1"], d_yolo["x2"], d_yolo["y2"]
+                # IoU rápido inline
+                ix1, iy1 = max(mx1, yx1), max(my1, yy1)
+                ix2, iy2 = min(mx2, yx2), min(my2, yy2)
+                if ix2 > ix1 and iy2 > iy1:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    y_area = (yx2 - yx1) * (yy2 - yy1)
+                    iou = inter / (m_area + y_area - inter)
+                    if iou > 0.5:
+                        skip = True
+                        break
+            if skip:
+                continue
+
+            # Este blob pasó los filtros de contención
+            blobs_filtrados.append(d_mov)
 
             detectado_en_crop = None
             if usar_filtro_mov:
@@ -591,7 +651,20 @@ class SussyPipeline:
 
         detecciones_yolo.extend(nuevas_detecciones_ia)
 
-        detecciones = combinar_detecciones(detecciones_yolo, detecciones_mov)
+        # Control de qué blobs de movimiento pasan al tracker
+        # Solo los blobs que pasaron los filtros de contención (blobs_filtrados)
+        # NUNCA los blobs que están dentro de objetos detectados por YOLO
+        
+        incluir_movimiento_sin_validar = getattr(Config, "INCLUIR_MOVIMIENTO_SIN_VALIDAR", False)
+        
+        if incluir_movimiento_sin_validar and blobs_filtrados:
+            # Agrupar blobs cercanos para evitar múltiples detecciones pequeñas
+            blobs_agrupados = self._agrupar_blobs_cercanos(blobs_filtrados, frame.shape)
+            detecciones = combinar_detecciones(detecciones_yolo, blobs_agrupados)
+        else:
+            # Solo detecciones validadas por IA
+            detecciones = detecciones_yolo
+        
         # Pasar tracks anteriores para análisis de trayectoria
         detecciones = self.evaluador_relevancia.filtrar(
             detecciones, frame.shape, tracks=self.ultimos_tracks
@@ -712,6 +785,87 @@ class SussyPipeline:
                 self.eventos_callback(e)
 
         return eventos_emitidos
+
+    def _agrupar_blobs_cercanos(
+        self,
+        blobs: List[Dict[str, Any]],
+        frame_shape: tuple,
+        distancia_max: int = 50,
+        max_blobs: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Agrupa blobs de movimiento cercanos. Versión optimizada.
+        """
+        if not blobs:
+            return []
+        
+        # Limitar número de blobs para rendimiento
+        if len(blobs) > max_blobs:
+            # Priorizar por frames_vivos (más persistentes)
+            blobs = sorted(blobs, key=lambda b: b.get("frames_vivos", 0), reverse=True)[:max_blobs]
+        
+        if len(blobs) == 1:
+            return blobs
+        
+        n = len(blobs)
+        
+        # Si hay pocos blobs, no agrupar (más rápido)
+        if n <= 3:
+            return blobs
+        
+        # Pre-calcular centros
+        centros = [(((b["x1"] + b["x2"]) >> 1), ((b["y1"] + b["y2"]) >> 1)) for b in blobs]
+        
+        # Union-Find optimizado con path compression
+        parent = list(range(n))
+        
+        def find(x: int) -> int:
+            root = x
+            while parent[root] != root:
+                root = parent[root]
+            while parent[x] != root:
+                parent[x], x = root, parent[x]
+            return root
+        
+        # Agrupar solo si están muy cerca (distancia al cuadrado para evitar sqrt)
+        dist_max_sq = distancia_max * distancia_max
+        for i in range(n):
+            cx1, cy1 = centros[i]
+            for j in range(i + 1, n):
+                cx2, cy2 = centros[j]
+                dist_sq = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2
+                if dist_sq < dist_max_sq:
+                    pi, pj = find(i), find(j)
+                    if pi != pj:
+                        parent[pi] = pj
+        
+        # Crear grupos
+        grupos: Dict[int, List[int]] = {}
+        for i in range(n):
+            root = find(i)
+            if root not in grupos:
+                grupos[root] = []
+            grupos[root].append(i)
+        
+        # Crear blobs agrupados (simplificado)
+        resultado = []
+        for indices in grupos.values():
+            if len(indices) == 1:
+                resultado.append(blobs[indices[0]])
+            else:
+                x1 = min(blobs[i]["x1"] for i in indices)
+                y1 = min(blobs[i]["y1"] for i in indices)
+                x2 = max(blobs[i]["x2"] for i in indices)
+                y2 = max(blobs[i]["y2"] for i in indices)
+                resultado.append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "clase": "movimiento", "score": 0.5,
+                    "area_px": (x2 - x1) * (y2 - y1),
+                    "velocidad_px": blobs[indices[0]].get("velocidad_px", 0),
+                    "frames_vivos": max(blobs[i].get("frames_vivos", 1) for i in indices),
+                })
+        
+        return resultado
 
     def _dibujar_overlay_camara(self, frame: np.ndarray) -> None:
         """Overlay textual indicando bloqueo por movimiento/zoom."""

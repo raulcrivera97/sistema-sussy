@@ -53,20 +53,33 @@ class Config:
     # ==========================================
     # DETECTOR DE MOVIMIENTO
     # ==========================================
-    MOVIMIENTO_UMBRAL = 25
-    MOVIMIENTO_AREA_MIN = 10
-    MOVIMIENTO_CONTRASTE_MIN = 5.0
-    MOVIMIENTO_MIN_FRAMES = 3
-    MOVIMIENTO_MIN_DESPLAZAMIENTO = 5
-    MOVIMIENTO_CROP_PADDING_PCT = 0.3  # Aumenta recortes de movimiento para contexto adicional
-    MOVIMIENTO_MAX_DETECCIONES = 120    # Límite de blobs por frame para evitar saturación
-    MOVIMIENTO_RAFAGA_BLOBS = 80        # Si se supera, asumimos sacudida (auto pausa)
-    MOVIMIENTO_RAFAGA_FRAMES = 2        # Frames de enfriamiento tras detectar ráfaga
+    MOVIMIENTO_UMBRAL = 30              # Umbral de diferencia entre frames (más alto = menos sensible)
+    MOVIMIENTO_AREA_MIN = 80            # Área mínima en píxeles (subido para evitar ruido)
+    MOVIMIENTO_CONTRASTE_MIN = 15.0     # Contraste mínimo con entorno (subido para menos falsos positivos)
+    MOVIMIENTO_MIN_FRAMES = 4           # Frames mínimos para confirmar movimiento
+    MOVIMIENTO_MIN_DESPLAZAMIENTO = 15  # Desplazamiento mínimo en píxeles
+    MOVIMIENTO_CROP_PADDING_PCT = 0.3   # Aumenta recortes de movimiento para contexto adicional
+    MOVIMIENTO_MAX_DETECCIONES = 30     # Límite de blobs por frame (reducido para rendimiento)
+    MOVIMIENTO_RAFAGA_BLOBS = 25        # Si se supera, asumimos sacudida
+    MOVIMIENTO_RAFAGA_FRAMES = 3        # Frames de enfriamiento tras detectar ráfaga
     MOVIMIENTO_RAFAGA_FRAMES_ACTIVACION = 2  # Frames consecutivos con ráfaga antes de pausar
-    MOVIMIENTO_ANOMALIA_TOTAL = 160     # Si hay más detecciones totales, se considera anomalía
-    MOVIMIENTO_ANOMALIA_POSIBLE_DRON = 8   # Nº máximo de posible_dron simultáneos
-    MOVIMIENTO_ANOMALIA_FRAMES_ACTIVACION = 1
-    MOVIMIENTO_ANOMALIA_FRAMES_ENFRIAMIENTO = 3
+    MOVIMIENTO_ANOMALIA_TOTAL = 40      # Si hay más detecciones totales, se considera anomalía
+    MOVIMIENTO_ANOMALIA_POSIBLE_DRON = 5   # Nº máximo de posible_dron simultáneos
+    MOVIMIENTO_ANOMALIA_FRAMES_ACTIVACION = 2  # Subido de 1 a 2 para evitar falsos positivos
+    MOVIMIENTO_ANOMALIA_FRAMES_ENFRIAMIENTO = 5  # Subido de 3 a 5
+    
+    # Filtro de contención: descartar blobs dentro de objetos YOLO
+    CLASES_CON_MOVIMIENTO_INTERNO = [
+        "person", "car", "motorcycle", "bus", "truck", "bicycle",
+        "bird", "dog", "cat", "horse", "cow", "elephant", "bear"
+    ]
+    MOVIMIENTO_MARGEN_CONTENCION = 0.15   # Margen extra alrededor del objeto YOLO (15%)
+    MOVIMIENTO_UMBRAL_CONTENCION = 0.6    # Proporción del blob que debe estar contenido (60%)
+    
+    # Control de blobs sin validar
+    # False = Solo las detecciones validadas por YOLO pasan al tracker
+    # True = Los blobs de movimiento relevantes también pasan como "movimiento" (para detectar objetos no identificados)
+    INCLUIR_MOVIMIENTO_SIN_VALIDAR = True
 
     # ==========================================
     # ESTABILIDAD DE LA CÁMARA
@@ -111,8 +124,7 @@ class Config:
         "drone",
         "bird",
         "airplane",
-        "posible_dron",
-    ]  # Clases que gatillan estados de interés en el orquestador
+    ]  # Clases que gatillan estados de interés - QUITADO "posible_dron"
 
     # ==========================================
     # TRACKER
@@ -124,11 +136,13 @@ class Config:
     # ==========================================
     # RELEVANCIA DE OBJETOS EN MOVIMIENTO
     # ==========================================
-    RELEVANCIA_AREA_DRON_MAX = 0.002    # Proporción del frame; por debajo se considera minúsculo (posible dron)
-    RELEVANCIA_AREA_RAMA_MIN = 0.02     # Por encima suelen ser ramas/paneles que ocupan demasiado
-    RELEVANCIA_VEL_MIN = 1.2            # Pixels por frame para considerar que realmente se desplaza
-    RELEVANCIA_BORDE_PCT = 0.08         # Porcentaje de margen: movimiento pegado al borde suele ser vegetación
-    RELEVANCIA_ASPECTO_RAMAS = 6.0      # Relaciones de aspecto muy alargadas suelen corresponder a ramas/paneles
+    RELEVANCIA_AREA_DRON_MAX = 0.003    # Proporción del frame; por debajo se considera minúsculo (posible dron)
+    RELEVANCIA_AREA_DRON_MIN = 0.0001   # Área mínima relativa para no ser ruido (nuevo)
+    RELEVANCIA_AREA_RAMA_MIN = 0.015    # Por encima suelen ser ramas/paneles que ocupan demasiado (bajado)
+    RELEVANCIA_VEL_MIN = 2.0            # Pixels por frame para considerar movimiento real (subido de 1.2)
+    RELEVANCIA_VEL_DRON_MIN = 3.0       # Velocidad mínima específica para clasificar como dron (nuevo)
+    RELEVANCIA_BORDE_PCT = 0.10         # Porcentaje de margen: movimiento pegado al borde (subido de 0.08)
+    RELEVANCIA_ASPECTO_RAMAS = 5.0      # Relaciones de aspecto muy alargadas (bajado de 6.0)
 
     # ==========================================
     # PREDICCIÓN DE MOVIMIENTO / ZONAS DE INTERÉS
@@ -186,11 +200,13 @@ class Config:
     # ==========================================
     # HEURÍSTICAS AVANZADAS DRON
     # ==========================================
-    DRON_ASPECTO_MIN = 0.5                 # Ratio mínimo ancho/alto (drones son compactos)
-    DRON_ASPECTO_MAX = 2.5                 # Ratio máximo ancho/alto
-    DRON_TRAYECTORIA_FRAMES = 5            # Frames para evaluar linealidad de trayectoria
-    DRON_TRAYECTORIA_LINEALIDAD_MIN = 0.7  # 0-1, cuán lineal es el movimiento (1=perfectamente recto)
-    DRON_PERSISTENCIA_CLASE_FRAMES = 3     # Frames como posible_dron antes de confirmar
+    DRON_ASPECTO_MIN = 0.6                 # Ratio mínimo ancho/alto (drones son compactos) - más estricto
+    DRON_ASPECTO_MAX = 2.0                 # Ratio máximo ancho/alto - más estricto
+    DRON_TRAYECTORIA_FRAMES = 8            # Frames para evaluar linealidad de trayectoria (subido)
+    DRON_TRAYECTORIA_LINEALIDAD_MIN = 0.75 # 0-1, cuán lineal es el movimiento (subido de 0.7)
+    DRON_PERSISTENCIA_CLASE_FRAMES = 6     # Frames como posible_dron antes de confirmar (subido de 3)
+    DRON_AREA_MIN_PX = 100                 # Área mínima en píxeles para considerar como dron (nuevo)
+    DRON_SCORE_BASE = 0.3                  # Score base para posible_dron (nuevo)
 
     # ==========================================
     # TRACKER MEJORADO
