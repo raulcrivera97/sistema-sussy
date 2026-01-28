@@ -126,8 +126,13 @@ class Config:
     
     # Opción 3: Modelo PERSONALIZADO Fase 1.5 (6 clases: persona, dron, vehiculo_civil, vehiculo_militar, pajaro, avion)
     #           Entrenado con COCO + datos propios - funciona en webcam Y contexto militar
-    YOLO_MODELO = "../Entrenamiento/modelos/fase1_5_v1/weights/best.pt"
-    YOLO_MODELO_ONNX = "../Entrenamiento/exports/fase1_5_v1.onnx"
+    # YOLO_MODELO = "../Entrenamiento/modelos/fase1_5_v1/weights/best.pt"
+    # YOLO_MODELO_ONNX = "../Entrenamiento/exports/fase1_5_v1.onnx"
+
+    # Opción 4: Modelo PERSONALIZADO Fase 2 (6 clases, entrenado con datos Fase 2 + Fase 1.5)
+    #           Incluye videos anotados de drones y vehículos militares
+    YOLO_MODELO = "../Entrenamiento/modelos/fase2_v1/weights/best.pt"
+    YOLO_MODELO_ONNX = "../Entrenamiento/exports/fase2_v1.onnx"
     
     YOLO_IMG_SIZE = 640           # Tamaño de entrada para YOLO
     YOLO_DEVICE = None            # "cuda", "cpu", "mps", "auto"/None
